@@ -286,3 +286,57 @@ pdf("figure4c-2.pdf",width = 8, height = 6)
 plotlipid("SPATS2L")
 dev.off()
 
+##########################################
+##valcano!
+##########################################
+plotvalc <- logfolddata %>%
+  left_join(pvalue.df,by = "lipidname") %>%
+  filter(str_detect(loglipid,"sample")==FALSE)
+
+cut_off_pvalue = 0.01
+cut_off_logFC = 0.4           
+
+plotvalc$change = ifelse(plotvalc$p.value < cut_off_pvalue & abs(plotvalc$log) > cut_off_logFC, 
+                        ifelse(plotvalc$log >= cut_off_logFC ,'Up','Down'),
+                        'Stable')
+
+valcano <- ggplot(
+  # 数据、映射、颜色
+  plotvalc, aes(x = log, y = -log10(p.value), colour=change)) +
+  geom_point(size=3.0) +
+  scale_color_manual(values=c("#0287c3", "#ECECEC","#F2300F"))+
+  # 辅助线
+  geom_vline(xintercept=c(-0.4,0.4),lty=3,col="black",lwd=0.5) +
+  geom_hline(yintercept = -log10(cut_off_pvalue),lty=4,col="black",lwd=0.8) +
+  # 坐标轴
+  labs(x="log2(fold change)",
+       y="-log10 (p-value)")+
+  theme_classic()+
+  # 图例
+  theme(plot.title = element_text(hjust = 0.5), 
+        legend.position="right", 
+        legend.title = element_blank())+
+  theme(axis.title =  element_text(size = 25))+
+  theme(legend.text=element_text(size=20))+
+  theme(axis.text = element_text(size = 20))
+
+
+
+plotvalc$label <- ifelse(plotvalc$p.value < cut_off_pvalue & abs(plotvalc$log) > cut_off_logFC,
+                        as.character(plotvalc$lipidname), "")
+
+k <-gsub(pattern = '(rep)', x = plotvalc$label, replacement = "")
+k <- gsub("(", "", k, fixed = TRUE) 
+k <- gsub(")", "", k, fixed = TRUE) 
+
+
+valcano + geom_label_repel(data = plotvalc, aes(x = log, 
+                                         y = -log10(p.value), 
+                                         label = k),
+                     size = 4, 
+                     point.padding = unit(0.8, "lines"), 
+                     segment.color = "black", 
+                     max.overlaps = getOption("ggrepel.max.overlaps", default = 20),
+                     show.legend = FALSE)
+
+ggsave("figure4b.pdf",width = 20, height = 15,units = "cm")
