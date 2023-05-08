@@ -301,18 +301,18 @@ plotvalc$change = ifelse(plotvalc$p.value < cut_off_pvalue & abs(plotvalc$log) >
                         'Stable')
 
 valcano <- ggplot(
-  # 数据、映射、颜色
+  
   plotvalc, aes(x = log, y = -log10(p.value), colour=change)) +
   geom_point(size=3.0) +
   scale_color_manual(values=c("#0287c3", "#ECECEC","#F2300F"))+
-  # 辅助线
+
   geom_vline(xintercept=c(-0.4,0.4),lty=3,col="black",lwd=0.5) +
   geom_hline(yintercept = -log10(cut_off_pvalue),lty=4,col="black",lwd=0.8) +
-  # 坐标轴
+
   labs(x="log2(fold change)",
        y="-log10 (p-value)")+
   theme_classic()+
-  # 图例
+
   theme(plot.title = element_text(hjust = 0.5), 
         legend.position="right", 
         legend.title = element_blank())+
