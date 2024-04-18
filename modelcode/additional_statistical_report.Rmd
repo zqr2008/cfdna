@@ -1,0 +1,195 @@
+---
+title: "Supplementary statistical report"
+author: "Qiangrong Zhai"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(hrbrthemes)
+library(wesanderson)
+library(ggsci)
+library(lme4)
+library(ggResidpanel)
+library(lsmeans)
+library(readxl)
+library(MetBrewer)
+library(rstatix)
+library(sjmisc)
+library(broom)
+library(flextable)
+
+rm(list=ls())
+```
+
+
+
+The primary focus of our data analysis centered on comparing the patterns of change in cfDNA features between the cases and controls. We employed linear mixed-effect models to compute least squares means of cfDNA for group differences and trend assessments. The primary outcome of interest was the pairwise differences between the cases and controls.
+Additionally, we hypothesized a priori that the progression of pregnancy trimesters may be associated with abnormal physiological changes in GDM, such as an increasing insulin-resistant state, which could manifest as alterations in cfDNA levels correlated with glucose levels. Therefore, our analytical models incorporated trimester progression and its interaction with disease status.
+For covariates, based the known risk factors for GDM and predictors of cfDNA, we considered pre-pregnancy BMI, maternal age (Lao TT, et al. Diabetes Care. 2006), ethnicity (Thorpe LE, et al., Am J Public Health. 2005), education (Bouthoorn SH, et al. Acta Diabetol. 2015), smoking (Sargeant LA, et al. Int J Epidemiol. 2001), and alcohol consumption (Wang WJ, et al. Front Endocrinol (Lausanne). 2019) as potential confounding variables in our analysis. Some covariates were not included in the finally adjusted model for the following reasons:
+i) Age: To address maternal age bias in the study design, we took measures to carefully select age-matched case-controls, as described in the methods section.
+ii) Ethnicity: All participants in our study belong to the Asian ethnicity.
+iii) Pre-pregnancy BMI: Although pre-pregnancy BMI is a known factor associated with GDM and can potentially influence cfDNA features, we decided not to include it as a covariate in our analysis. This decision was based on previous research indicating that obesity-induced DNA released from adipocytes can stimulate insulin resistance (Nishimotoet al. Sci. Adv. 2016). The interplay between obesity, GDM and cfDNA is complicated, potentially introducing collider bias into our study (as discussed by Lee H in the Catalogue of Bias, 2019). Furthermore, our primary focus is to examine whether disease status affects cfDNA features, and we are less concerned with how this effect may be mediated by obesity.
+We will construct two models for our analysis: model 1, which is unadjusted, and model 2, a linear mixed-effects model that includes adjustments for education, alcohol consumption during pregnancy (yes/no), and smoking during pregnancy (yes/no). Our results and subsequent discussion will be based on the outcomes of these two types of models.
+
+\newpage
+
+```{r load data, echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+seqff_1794 <- read.delim("~/cfDNA/seqff_1794.txt")
+data299new <- read_excel("data299new.xlsx")
+group_349 <- read.csv("group_349.csv")
+motif <- read.delim("feature_1794.tsv")
+```
+
+```{r merge data,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+group_349$people <- as.character(group_349$people)
+group_349 <- group_349 %>%
+  dplyr::select(people,sample)
+
+seqff_1794 <- seqff_1794 %>%
+  left_join(group_349,by="sample") %>%
+  dplyr:: rename(ID = people) %>%
+  left_join(data299new, by ="ID") %>%
+  mutate(trimester = case_when(str_detect(group,"1")~"1st",
+                               str_detect(group,"2")~"2nd",
+                               str_detect(group,"3")~"3rd"),
+         disease = case_when(str_detect(group,"ctr")~"Control",
+                             str_detect(group,"case")~"GDM"),
+         subject =  substr(number,1,7)) %>%
+  select(-seqff) %>%
+  left_join(motif, by ="sample")
+```
+
+
+```{r,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+holdmeans <- data.frame()
+holdpvalue <- data.frame()
+
+resultlist <- list()
+
+
+summary_multiple <- function(inputdf, namelist,whetheradj = TRUE, outp = FALSE){
+  for (i in namelist) {
+    if (whetheradj == TRUE){
+    lmer_mode.mod <- lme4::lmer(reformulate("disease + trimester + educationlevel+  smokingafterpreg+ drinkingafterpreg + trimester*disease +(1|subject)",i),
+                                data = inputdf)
+  }
+  else{
+      lmer_mode.mod <- lme4::lmer(reformulate("disease + trimester + trimester*disease +(1|subject)",i),
+                                  data = inputdf)
+    }
+  
+    lsmeansOut <- lsmeans(lmer_mode.mod, pairwise ~ disease)
+    lsmeans_output <- summary(lsmeansOut)
+    
+    lsmeansestimate <- as.data.frame(lsmeans_output[["lsmeans"]])  %>%
+      add_column(feature = i) %>%
+      relocate(feature,.before = disease) %>%
+      mutate(across(where(is.numeric), round, 5))
+    
+    holdmeans <- rbind(holdmeans,lsmeansestimate)
+    
+    lsmeanspvalue <- as.data.frame(lsmeans_output[["contrasts"]]) %>%
+      add_column(feature = i) %>%
+      relocate(feature,.before = contrast) %>%
+      mutate(across(where(is.numeric), round, 5))
+    
+    holdpvalue <- rbind(holdpvalue,lsmeanspvalue)
+
+    detailedcontrast <- lsmeans(lmer_mode.mod, pairwise ~ trimester)
+    detailedcontrast_output <- summary(detailedcontrast)
+  
+    
+    detailedcontrastpvalue <- as.data.frame(detailedcontrast_output[["contrasts"]])  %>%
+      add_column(feature = i) %>%
+      relocate(feature,.before = contrast) %>%
+      mutate(across(where(is.numeric), round, 5))
+    
+  
+    holdpvalue <- rbind(holdpvalue,detailedcontrastpvalue)
+    
+  }
+  if (outp == TRUE){
+    return(holdpvalue)
+  }
+  else(return(holdmeans))
+}
+
+
+```
+
+```{r testedlist,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+test_name <- c("seqff","CCCA","ACTT","ACCG","GCGG","GCGC","TCGG","all","short","peak","long","MA")
+adjustmeanstable <- summary_multiple(seqff_1794, test_name,whetheradj = TRUE,outp = FALSE)
+unadjustmeanstable <-  summary_multiple(seqff_1794, test_name,whetheradj = FALSE,outp = FALSE)
+adjustptable <- summary_multiple(seqff_1794, test_name,whetheradj = TRUE,outp = TRUE) %>%
+  dplyr::rename(Adjusted = p.value) 
+unadjustptable <- summary_multiple(seqff_1794, test_name,whetheradj = FALSE,outp = TRUE)%>%
+  dplyr::rename(Unadjusted = p.value)
+
+combinedp <- cbind(unadjustptable,adjustptable) %>%
+  dplyr::select(c(1:2),Adjusted,Unadjusted)
+```
+
+
+```{r combinedp,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(combinedp) %>%
+  theme_vanilla() %>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table 1. linear mixed-effects model contrasts between GDM and controls, and trimesters") %>%
+  autofit()
+```
+
+
+\newpage
+```{r unadjustmeanstable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(unadjustmeanstable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model without covariate adjustment")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S1. Least-squares means for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```
+
+
+
+
+\newpage
+```{r adjustmeanstable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(adjustmeanstable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model that includes adjustments for education, alcohol consumption during pregnancy (yes/no), and smoking during pregnancy (yes/no)")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S2. Least-squares means for linear mixed effect models for cfDNA features") %>%
+  autofit()
+```
+
+\newpage
+```{r unadjustptable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(unadjustptable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model without adjustment for covariates")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S3. Least-squares contrast for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```
+
+
+\newpage
+```{r adjustptable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(adjustptable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model that includes adjustments for education, alcohol consumption during pregnancy (yes/no), and smoking during pregnancy (yes/no)")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S4. Least-squares contrast for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```

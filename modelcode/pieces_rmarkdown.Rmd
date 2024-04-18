@@ -1,0 +1,417 @@
+---
+title: "Supplementary statistical report"
+author: "Qiangrong Zhai"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(ggsci)
+library(lme4)
+library(lsmeans)
+library(readxl)
+library(MetBrewer)
+library(rstatix)
+library(sjmisc)
+library(broom)
+library(flextable)
+library(factoextra)
+library(pheatmap)
+library(viridis)
+library(reshape2)
+library(ggpubr)
+
+rm(list=ls())
+```
+
+
+
+```{r load data,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+pieces <- read.delim("~/cfDNA/Region_End_index_UD500.txt", row.names=1)
+data299new <- read_excel("data299new.xlsx")
+group_349 <- read.csv("group_349.csv")
+motif <- read.delim("feature_1794.tsv")
+gene50_tss <- read.delim("~/cfDNA/gene50_tss.txt", row.names=1)
+group_349$people <- as.character(group_349$people)
+
+pieces<- pieces[rowSums(pieces[])>0,]
+test_name <- rownames(pieces)
+
+pieces <- pieces %>%
+  rotate_df() %>%
+  rownames_to_column("sample") %>%
+  left_join(group_349,by="sample") %>%
+  dplyr:: rename(ID = people) %>%
+  left_join(data299new, by ="ID") %>%
+  mutate(trimester = case_when(str_detect(group,"1")~"1st",
+                               str_detect(group,"2")~"2nd",
+                               str_detect(group,"3")~"3rd"),
+         disease = case_when(str_detect(group,"ctr")~"Control",
+                             str_detect(group,"case")~"GDM"),
+         subject =  substr(number,1,7))
+
+
+gene50_tss <- gene50_tss %>%
+  rotate_df() %>%
+  rownames_to_column("sample") 
+
+join_tss_piece <- gene50_tss %>%
+  left_join(pieces,by="sample") %>%
+  dplyr::select(gene_1_00620_RCAN3:ZNF853)
+
+
+
+holdmeans <- data.frame()
+holdpvalue <- data.frame()
+resultlist <- list()
+
+```
+
+```{r function load,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+summary_multiple <- function(inputdf, namelist,whetheradj = TRUE, outp = FALSE){
+  for (i in namelist) {
+    if (whetheradj == TRUE){
+      lmer_mode.mod <- lme4::lmer(reformulate("disease + trimester + educationlevel+  smokingafterpreg+ drinkingafterpreg + trimester*disease +(1|subject)",i),
+                                  data = inputdf)
+    }
+    else{
+      lmer_mode.mod <- lme4::lmer(reformulate("disease + trimester + trimester*disease +(1|subject)",i),
+                                  data = inputdf)
+    }
+    
+    lsmeansOut <- lsmeans(lmer_mode.mod, pairwise ~ disease)
+    lsmeans_output <- summary(lsmeansOut)
+    
+    lsmeansestimate <- as.data.frame(lsmeans_output[["lsmeans"]])  %>%
+      add_column(feature = i) %>%
+      relocate(feature,.before = disease) %>%
+      mutate(across(where(is.numeric), round, 5))
+    
+    holdmeans <- rbind(holdmeans,lsmeansestimate)
+    
+    lsmeanspvalue <- as.data.frame(lsmeans_output[["contrasts"]]) %>%
+      add_column(feature = i) %>%
+      relocate(feature,.before = contrast) %>%
+      mutate(across(where(is.numeric), round, 5))
+    
+    holdpvalue <- rbind(holdpvalue,lsmeanspvalue)
+    
+  }
+  if (outp == TRUE){
+    return(holdpvalue)
+  }
+  else(return(holdmeans))
+  
+  
+}
+
+
+```
+
+
+```{r derive multiple,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+adjustmeanstable <- summary_multiple(pieces, test_name,whetheradj = TRUE,outp = FALSE)
+
+unadjustmeanstable <-  summary_multiple(pieces, test_name,whetheradj = FALSE,outp = FALSE)
+adjustptable <- summary_multiple(pieces, test_name,whetheradj = TRUE,outp = TRUE) %>%
+  dplyr::rename(Adjusted = p.value) 
+unadjustptable <- summary_multiple(pieces, test_name,whetheradj = FALSE,outp = TRUE)%>%
+  dplyr::rename(Unadjusted = p.value)
+
+
+combinedp <- cbind(unadjustptable,adjustptable) %>%
+  dplyr::select(c(1:2),Adjusted,Unadjusted)
+```
+
+
+
+```{r combinedp,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(combinedp) %>%
+  theme_vanilla() %>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table 1. linear mixed-effects model contrasts between cases and controls") %>%
+  autofit()
+```
+
+
+\newpage
+```{r unadjustmeanstable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(unadjustmeanstable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model without covariate adjustment")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S1. Least-squares means for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```
+
+
+
+
+\newpage
+```{r adjustmeanstable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(adjustmeanstable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model that includes adjustments for education, alcohol consumption during pregnancy (yes/no), and smoking during pregnancy (yes/no)")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S2. Least-squares means for linear mixed effect models for cfDNA features") %>%
+  autofit()
+```
+
+\newpage
+```{r unadjustptable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(unadjustptable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model without adjustment for covariates")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S3. Least-squares contrast for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```
+
+
+\newpage
+```{r adjustptable,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+flextable(adjustptable) %>%
+  theme_vanilla() %>%
+  add_footer_lines("a linear mixed-effects model that includes adjustments for education, alcohol consumption during pregnancy (yes/no), and smoking during pregnancy (yes/no)")%>%
+  color(part = "footer", color = "#666666") %>%
+  set_caption(caption = "Table S4. Least-squares contrast for linear mixed effect models for cfDNA features") %>%
+  autofit()
+  
+```
+
+
+```{r pca_pc}
+res.pca <- prcomp(pieces[,2:50], scale = FALSE)
+fviz_eig(res.pca)
+```
+```{r PCA plot,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+fviz_pca_ind(res.pca,
+             col.ind = pieces$trimester,
+             #palette = c("#00AFBB",  "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             #ellipse.level=0.95,
+             #ellipse.type = "confidence",
+             legend.title = "disease",
+             #label= sampleinfo$样品名称
+             
+             #repel = TRUE
+)
+
+```
+```{r cor calculation between TSS and region end index ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+
+cor.mat <- join_tss_piece %>% cor_mat(method = "spearman") %>%
+    filter(str_detect(rowname,"gene") == FALSE) %>%
+  column_to_rownames("rowname") %>%
+  select(-c(51:97))
+
+cor.mat.p <- cor.mat %>% cor_get_pval() %>%
+    filter(str_detect(rowname,"gene") == FALSE) %>%
+  column_to_rownames("rowname") %>%
+  select(-c(51:97))
+
+
+all.cor <- data.frame()
+for (z in 1:nrow(cor.mat)){
+  for (j in 1:ncol(cor.mat)){
+    all.cor[z,j] <- paste(cor.mat[z,j], "(",cor.mat.p[z,j],")")
+  }
+}
+
+
+```
+
+
+```{r cor selection between TSS and region end index ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+tss_name <- colnames(cor.mat)
+pieces_name <- rownames(cor.mat)
+
+
+reorderlist <- list()
+
+
+for (i in (1:length(tss_name))){
+  for (j in (1:length(pieces_name))){
+    if(str_detect(tss_name[i],pieces_name[j])){
+     reorderlist[j] <- tss_name[i]
+    }
+  } 
+}
+
+reorderlist <- as.vector(unlist(reorderlist))
+
+core_name <- as.data.frame(cbind(pieces_name,reorderlist))
+
+meltedmat <- cor.mat %>%
+  rownames_to_column("pieces_name")
+meltedmat <- melt(meltedmat)
+
+selected_cor <- merge(core_name, meltedmat, by.x = c("pieces_name", "reorderlist"), by.y = c("pieces_name", "variable"))
+
+
+meltedmat.p <- cor.mat.p %>%
+  rownames_to_column("pieces_name")
+meltedmat.p <- melt(meltedmat.p )
+
+selected_cor.p <- merge(core_name, meltedmat.p, by.x = c("pieces_name", "reorderlist"), by.y = c("pieces_name", "variable"))
+```
+
+
+```{r heatmap between TSS and region end index ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+all.cor <- data.frame()
+for (z in 1:nrow(as.data.frame(selected_cor[,3]))){
+  for (j in 1:ncol(as.data.frame(selected_cor[,3]))){
+    all.cor[z,j] <- paste(as.data.frame(selected_cor[,3])[z,j], "\n", as.data.frame(selected_cor.p[,3])[z,j])
+  }
+}
+
+pheatmap(t(selected_cor[,3]),
+         cluster_cols = F,
+         cluster_rows = F,
+         display_numbers = t(all.cor),
+         cellwidth =20,
+         cellheight =20,
+         number_color = "white",
+         color = viridis(7),
+         border_color = "white",
+         fontsize = 5,
+         labels_col = t(selected_cor[,1]),
+         main = "Correlation between TSS score and Region-End Index")
+```
+
+
+
+
+```{r cor calculation between cfRNA and tss,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+cfRNAcfDNA <- read.csv("~/cfDNA/cfDNA_cfRNAsampleinfo.csv",row.names=1)
+cfRNA <- read.csv("~/cfDNA/tpm_cfrna_overlap.csv",row.names=1) %>%
+  rotate_df() 
+
+colnames (cfRNA) <- paste("cfRNA", colnames(cfRNA), sep = "_") 
+  
+cfRNA <- cfRNA %>%  
+  rownames_to_column("sample_cfRNA") %>%
+  left_join(cfRNAcfDNA,by = "sample_cfRNA") %>%
+  dplyr::select(sample,starts_with("cfRNA"))
+
+
+join_tss_cfRNA <- cfRNA %>%
+  left_join(gene50_tss,by="sample") %>%
+  #left_join(pieces,by="sample") %>%
+  left_join(group_349,by = "sample") %>%
+  filter(time == "third") %>%
+  dplyr::select(cfRNA_APH1B:gene_1_38495_PDXP) 
+  #dplyr::select(cfRNA_APH1B:ZNF853) 
+```
+
+
+```{r}
+cor.mat <- join_tss_cfRNA %>% cor_mat(method = "spearman") %>%
+    filter(str_detect(rowname,"cfRNA") == FALSE) %>%
+  column_to_rownames("rowname") %>%
+  dplyr::select(starts_with("cfRNA"))
+
+cor.mat.p <- cor.mat %>% cor_get_pval() %>%
+    filter(str_detect(rowname,"cfRNA") == FALSE) %>%
+  column_to_rownames("rowname") %>%
+  dplyr::select(starts_with("cfRNA"))
+
+all.cor <- data.frame()
+for (z in 1:nrow(cor.mat)){
+  for (j in 1:ncol(cor.mat)){
+    all.cor[z,j] <- paste(cor.mat[z,j], "(",cor.mat.p[z,j],")")
+  }
+}
+```
+
+
+
+
+```{r cor calculation between cfRNA and region end index ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+cfRNA_name <- colnames(cor.mat)
+pieces_name <- rownames(cor.mat)
+pieces_name  <- str_split_fixed(pieces_name,"_",n=4)[,4]
+
+reorderlist <- list()
+updatepieces <- list()
+
+for (i in (1:length(cfRNA_name))){
+  for (j in (1:length(pieces_name))){
+    if(str_detect(cfRNA_name[i],pieces_name[j])){
+     reorderlist[j] <- cfRNA_name[i]
+     updatepieces[j] <- pieces_name[j]
+    }
+  } 
+}
+
+reorderlist <- as.vector(unlist(reorderlist))
+updatepieces <- as.vector(unlist(updatepieces))
+core_name <- as.data.frame(cbind(updatepieces,reorderlist))
+
+
+meltedmat <- cor.mat %>%
+  rownames_to_column("updatepieces")
+meltedmat <- melt(meltedmat)
+
+meltedmat$updatepieces <- str_split_fixed(meltedmat $updatepieces,"_",n=4)[,4]
+
+selected_cor <- merge(core_name, meltedmat, by.x = c("updatepieces", "reorderlist"), by.y = c("updatepieces", "variable"))
+
+meltedmat.p <- cor.mat.p %>%
+  rownames_to_column("updatepieces")
+meltedmat.p <- melt(meltedmat.p )
+meltedmat.p$updatepieces <- str_split_fixed(meltedmat.p$updatepieces,"_",n=4)[,4]
+
+selected_cor.p <- merge(core_name, meltedmat.p, by.x = c("updatepieces", "reorderlist"), by.y = c("updatepieces", "variable"))
+```
+
+
+```{r heatmap between TSS and region end index ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+all.cor <- data.frame()
+for (z in 1:nrow(as.data.frame(selected_cor[,3]))){
+  for (j in 1:ncol(as.data.frame(selected_cor[,3]))){
+    all.cor[z,j] <- paste(as.data.frame(selected_cor[,3])[z,j], "\n", as.data.frame(selected_cor.p[,3])[z,j])
+  }
+}
+
+pheatmap(t(selected_cor[,3]),
+         cluster_cols = F,
+         cluster_rows = F,
+         display_numbers = t(all.cor),
+         cellwidth =20,
+         cellheight =20,
+         number_color = "white",
+         color = viridis(7),
+         border_color = "white",
+         fontsize = 5,
+         labels_col = t(selected_cor[,1]),
+         main = "Correlation between cfRNA(TPM) and TSS for late trimester")
+```
+
+```{r scatter plot with phenotype ,echo=FALSE,include= TRUE, warning=FALSE,message=FALSE}
+
+regionend <- colnames(join_tss_piece)[1:50]
+join_tss_piece$HbA1c <- as.numeric(join_tss_piece$HbA1c)
+
+for (i in regionend){
+pic <- ggscatter(join_tss_piece, x = j, y = i,size =1,
+          add = "reg.line", conf.int = TRUE,
+          add.params = list(fill = "lightgray")
+)+stat_cor(method = "spearman")+
+  xlab("HbA1c")+ylab(paste0("tss",i))
+print(pic)
+}
+```
+
+
